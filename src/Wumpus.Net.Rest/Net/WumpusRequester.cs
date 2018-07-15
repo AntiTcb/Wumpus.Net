@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
+using Voltaic;
 using Wumpus.Entities;
 using Wumpus.Serialization;
 
@@ -53,30 +54,31 @@ namespace Wumpus.Net
                 switch (response.StatusCode)
                 {
                     case (HttpStatusCode)429:
-                        {
-                            if (info.IsGlobal)
-                                UpdateGlobalRateLimit(info);
-                            else
-                                bucket.UpdateRateLimit(info, true);
-                        }
+                        if (info.IsGlobal)
+                            UpdateGlobalRateLimit(info);
+                        else
+                            bucket.UpdateRateLimit(info, true);
                         continue;
                     case HttpStatusCode.BadGateway: //502
                         await Task.Delay(250, request.CancellationToken).ConfigureAwait(false);
                         continue;
                     default:
-                        {
-                            if (allowAnyStatus)
-                                return response;
-                            RestError error = null;
-                            try
-                            {
-                                // TODO: Does this allocate?
-                                var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                                error = _serializer.Read<RestError>(bytes.AsSpan());
-                            }
-                            catch { }
-                            throw new DiscordRestException(response.StatusCode, error?.Code, error?.Message);
-                        }
+                        if (allowAnyStatus)
+                            return response;
+                        // TODO: Does this allocate?
+                        var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+
+                        RestError error = null;
+                        try { error = _serializer.Read<RestError>(bytes.AsSpan()); } catch { }
+                        if (error != null)
+                            throw new DiscordRestException(response.StatusCode, error.Code, error.Message);
+
+                        Utf8String msg = null;
+                        try { msg = new Utf8String(bytes); } catch { }
+                        if (msg != (Utf8String)null)
+                            throw new DiscordRestException(response.StatusCode, null, msg);
+
+                        throw new DiscordRestException(response.StatusCode);
                 }
             }
         }
